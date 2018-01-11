@@ -54,6 +54,7 @@ import           Pos.Infra.Configuration (HasInfraConfiguration)
 import           Pos.Launcher.Param (BaseParams (..), LoggingParams (..), NodeParams (..))
 import           Pos.Lrc.Context (LrcContext (..), mkLrcSyncData)
 import           Pos.Network.Types (NetworkConfig (..), Topology (..))
+import           Pos.Reporting.MemState (MisbehaviorMetrics (..))
 import           Pos.Shutdown.Types (ShutdownContext (..))
 import           Pos.Slotting (SlottingContextSum (..), mkNtpSlottingVar, mkSimpleSlottingVar)
 import           Pos.Slotting.Types (SlottingData)
@@ -157,7 +158,7 @@ allocateNodeResources transport networkConfig np@NodeParams {..} sscnp txpSettin
                 , ancdEkgStore = nrEkgStore
                 , ancdTxpMemState = txpVar
                 }
-        ctx@NodeContext {..} <- allocateNodeContext ancd txpSettings
+        ctx@NodeContext {..} <- allocateNodeContext ancd txpSettings nrEkgStore
         putLrcContext ncLrcContext
         dlgVar <- mkDelegationVar
         sscState <- mkSscState
@@ -256,8 +257,9 @@ allocateNodeContext
       (HasConfiguration, HasNodeConfiguration, HasInfraConfiguration)
     => AllocateNodeContextData ext
     -> TxpGlobalSettings
+    -> Metrics.Store
     -> InitMode NodeContext
-allocateNodeContext ancd txpSettings = do
+allocateNodeContext ancd txpSettings ekgStore = do
     let AllocateNodeContextData { ancdNodeParams = np@NodeParams {..}
                                 , ancdSscParams = sscnp
                                 , ancdPutSlotting = putSlotting
@@ -289,6 +291,10 @@ allocateNodeContext ancd txpSettings = do
     -- populates it.
     peersVar <- newTVarIO mempty
     ncSubscriptionKeepAliveTimer <- newTimer $ 30 * 1000000 -- TODO: use slot duration
+    _mmRollbacks <- liftIO $ Metrics.createGauge "cardano.BlockRollbacks" ekgStore
+    _mmSscFailures <- liftIO $ Metrics.createCounter "cardano.SCCComputationFailures" ekgStore
+    _mmIgnoredCommitments <- liftIO $ Metrics.createGauge "cardano.IgnoredCommitments" ekgStore
+    let mm = MisbehaviorMetrics {..}
     let ctx =
             NodeContext
             { ncConnectedPeers = ConnectedPeers peersVar
@@ -297,6 +303,7 @@ allocateNodeContext ancd txpSettings = do
             , ncNodeParams = np
             , ncTxpGlobalSettings = txpSettings
             , ncNetworkConfig = networkConfig
+            , ncMisbehaviorMetrics = Just mm
             , ..
             }
     return ctx
