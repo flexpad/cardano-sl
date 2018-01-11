@@ -167,12 +167,21 @@ launcherArgsParser = do
         metavar "PATH"
     pure $ LauncherArgs {..}
 
+debugLog :: FilePath -> Text -> IO ()
+debugLog filename contents = do
+    logDir <- (</> "Daedalus\\Logs") <$> getEnv "APPDATA"
+    writeFile (logDir </> filename) contents
+
 getLauncherOptions :: IO LauncherOptions
 getLauncherOptions = do
+    debugLog "msg2.txt" "before execParser"
     LauncherArgs {..} <- execParser programInfo
+    debugLog "msg3.txt" "after execParser"
     decoded <- Y.decodeFileEither configPath
+    debugLog "msg4.txt" "after decodeFileEither"
     case decoded of
         Left err -> do
+            debugLog "msg5-left1.txt" "Left branch"
             -- Since at this point we have failed to parse the config,
             -- the only option is to hardcode where to leave the error log.
 #ifdef mingw32_HOST_OS
@@ -180,11 +189,16 @@ getLauncherOptions = do
 #else
             logDir <- (</> "Library/Application Support/Daedalus/Logs") <$> getEnv "HOME"
 #endif
+            debugLog "msg5-left2.txt" "Creating dir"
             createDirectoryIfMissing True logDir
+            debugLog "msg5-left3.txt" "Writing log"
             writeFile (logDir </> "config-error.log") $
                 sformat ("Failed to parse "%string%": "%shown) configPath err
+            debugLog "msg5-left4.txt" "Throwing"
             throwM $ ConfigParseError configPath err
-        Right op -> expandVars daedalusDir op
+        Right op -> do
+            debugLog "msg5-right.txt" "Calling expandVars"
+            expandVars daedalusDir op
   where
     programInfo = info (helper <*> versionOption <*> launcherArgsParser) $
         fullDesc <> progDesc ""
@@ -203,11 +217,16 @@ getLauncherOptions = do
         --     nodeLogPath, updaterPath,
         --     updateWindowsRunner, launcherLogsPrefix
         -- %DAEDALUS_DIR%: nodePath, walletPath
+        debugLog "msg6.txt" "Retrieving %APPDATA%"
         appdata <- toText <$> getEnv "APPDATA"
+        debugLog "msg7.txt" "Retrieving %DAEDALUS_DIR%"
         daedalusDirEnv <- lookupEnv "DAEDALUS_DIR"
+        debugLog "msg8.txt" $ "%DAEDALUS_DIR% is " <> show daedalusDirEnv
         case daedalusDirArg <|> daedalusDirEnv of
             Nothing -> do
+                debugLog "msg8-nothing1.txt" "Nothing branch"
                 env <- getEnvironment
+                debugLog "msg8-nothing2.txt" $ "Environment:\n" <> show env
                 throwM $ NoDaedalusDir env
             Just daedalusDir -> do
                 let replaceAppdata = replace "%APPDATA%" appdata
@@ -282,6 +301,7 @@ main =
   Silently.hSilence [stdout, stderr] $
 #endif
   do
+    debugLog "msg1.txt" "startup"
     LO {..} <- getLauncherOptions
     -- Add options specified in loConfiguration but not in loNodeArgs to loNodeArgs.
     let realNodeArgs = addConfigurationOptions loConfiguration $
